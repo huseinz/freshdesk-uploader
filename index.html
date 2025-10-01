@@ -363,7 +363,7 @@
                     displayMessage(`Sheet "${contactSheetName}" not found in the file.`, 'error');
                     return;
                 }
-                const contacts = XLSX.utils.sheet_to_json(sheet, {raw:false,dateNF:'yyyy-mm-dd', defval: null});
+                const contacts = XLSX.utils.sheet_to_json(sheet, {raw:false,dateNF:'yyyy-mm-dd', defval: ''});
                 if (contacts.length === 0) {
                     displayMessage('The selected file is empty or not properly formatted.', 'error');
                     return;
@@ -472,7 +472,7 @@
                     displayMessage(`Sheet "${ticketSheetName}" not found in the file.`, 'error');
                     return;
                 }
-                const tickets = XLSX.utils.sheet_to_json(sheet, {raw:false,dateNF:'yyyy-mm-dd', defval: null});
+                const tickets = XLSX.utils.sheet_to_json(sheet, {raw:false,dateNF:'yyyy-mm-dd', defval: ''});
                 if (tickets.length === 0) {
                     displayMessage('The selected file is empty or not properly formatted.', 'error');
                     return;
