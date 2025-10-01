@@ -87,10 +87,27 @@
                 let response = await fetch(`https://${domain}${endpoint}`, fetchOptions);
                 // handle 401
                 if (response.status === 401){
-                    throw new Error('Invalid API key!');
+                    throw new Error('Error: Invalid API key!');
                 }
                 Freshdesk.previousHeaders = response.headers; // Store current headers for next request
                 return response;
+            }
+            async make_paginated_get_request(endpoint) {
+                let allData = [];
+                let page = 1;
+                while (true) {
+                    let response = await this.make_request(`${endpoint}?page=${page}`, 'GET');
+                    if (!response.ok) {
+                        throw new Error(`Error fetching data: ${response.statusText}`);
+                    }
+                    let data = await response.json();
+                    allData = allData.concat(data);
+                    if (data.length === 0) {
+                        break;
+                    }
+                    page++;
+                }
+                return allData;
             }
             async listContactFields() {
                 let response = await this.make_request(`/api/v2/contact_fields`, 'GET');
@@ -169,11 +186,25 @@
                 // Contact with this ID already exists, update it
                 console.log('Existing User ID?:', user_id);
                 response = await this.make_request(`/api/v2/contacts/${user_id}`, 'PUT', formatted_contact);
+                // if 405 returned, contact was soft deleted. Restore them and retry update
+                if (response.status === 405) {
+                    response = await this.make_request(`/api/v2/contacts/${user_id}/restore`, 'PUT');
+                    if (!response.ok) {
+                        let returnData = await response.json();
+                        throw new Error(`Error restoring contact: ${JSON.stringify(returnData)}`);
+                    }
+                    // Retry the update after restoring
+                    response = await this.make_request(`/api/v2/contacts/${user_id}`, 'PUT', formatted_contact);
+                }
                 if (!response.ok) {
                     let returnData = await response.json();
-                    throw new Error(`Error updating contact: ${JSON.stringify(returnData.errors)}`);
+                    throw new Error(`Error updating contact: ${JSON.stringify(returnData)}`);
                 }
                 return 'Success (Updated Existing Contact)';
+            }
+
+            async listAllTickets() {
+                return await this.make_paginated_get_request('/api/v2/tickets');
             }
 
             async createTicket(ticket) {
@@ -203,7 +234,7 @@
                 if (response.ok) {
                     let returnData = await response.json();
                     console.log('Created ticket:', returnData);
-                    return 'Success (Created New Ticket)';
+                    return 'Success (Created Ticket #' + returnData.id + ')';
                 }
                 let returnData = await response.json();
                 throw new Error(`Error creating ticket: ${JSON.stringify(returnData.errors)}`);
@@ -263,7 +294,9 @@
             const rowData = blacklistColumns(data);
             // Create header row dynamically based on keys of the first object
             const headerRow = document.createElement("tr");
-            Object.keys(rowData).forEach(key => {
+            const fields = Object.keys(rowData);
+            fields.unshift(fields.pop()); // Move 'status' to the front
+            fields.forEach(key => {
                 const th = document.createElement("th");
                 th.textContent = key.charAt(0).toUpperCase() + key.slice(1); // Capitalize first letter
                 headerRow.appendChild(th);
@@ -283,13 +316,18 @@
             const rowData = blacklistColumns(data);
             // Create table rows and cells
             const row = document.createElement("tr");
-            row.classList.add('error');
-            Object.values(rowData).forEach(value => {
+            const fields = Object.keys(rowData);
+            if (fields.at(-1) === 'status') {
+                fields.unshift(fields.pop()); // Move 'status' to the front
+            }
+            fields.forEach((key, index) => {
                 const td = document.createElement("td");
-                td.textContent = value;
-                if (typeof value === 'string' && value.startsWith('Success')) {
+                td.textContent = rowData[key];
+                if (key === 'status' && rowData[key].startsWith('Success')) {
                     row.classList.add('success');
-                    row.classList.remove('error');
+                }
+                if (key === 'status' && rowData[key].startsWith('Error')) {
+                    row.classList.add('error');
                 }
                 row.appendChild(td);
             });
@@ -460,8 +498,6 @@
                 displayMessage('Please select a sheet from the dropdown.', 'error');
                 return;
             }
-            const freshdesk = new Freshdesk(apiKey);
-
             const file = fileInput.files[0];
             const reader = new FileReader();
             reader.onload = async (e) => {
@@ -478,12 +514,27 @@
                     return;
                 }
                 displayProgress(`Loaded ${tickets.length} ticket(s) from the file. Starting upload...`);
+
+                const freshdesk = new Freshdesk(apiKey);
+                const allTickets = await freshdesk.listAllTickets();
+                displayMessage(`There are currently ${allTickets.length} tickets in the system.`);
+                const existingTicketIds = new Set(allTickets.map(ticket => ticket.custom_fields.cf_careconnect_ticket_no));
+
                 let successCount = 0;
                 let errorCount = 0;
+                let skippedCount = 0;
                 let processedCount = 0;
                 tickets[0].status = '';
                 const tbody = initDynamicTable(tickets[0], table);
                 for (const ticket of tickets) {
+                    if (existingTicketIds.has(ticket['Careconnect Ticket No'])) {
+                        ticket.status = 'Skipped (Ticket with Careconnect Ticket No ' + ticket['Careconnect Ticket No'] + ' already exists)';
+                        skippedCount++;
+                        updateDynamicTable(ticket, tbody);
+                        processedCount++;
+                        displayProgress(`Skipping ticket ${processedCount} of ${tickets.length} (already exists)...`);
+                        continue;
+                    }
                     displayProgress(`Uploading ticket ${processedCount + 1} of ${tickets.length}...`);
                     processedCount++;
                     try {
@@ -497,13 +548,7 @@
                     }
                     updateDynamicTable(ticket, tbody);
                 }
-                if (successCount > 0) {
-                    displayMessage(`Successfully uploaded ${successCount} out of ${tickets.length} ticket(s).`, 'success');
-                }
-                if (errorCount > 0) {
-                    displayMessage(`Failed to upload ${errorCount} ticket(s). See below table for details.`, 'error');
-                }
-                displayProgress('Upload process completed.');
+                displayMessage(`Completed. ${tickets.length} ticket(s) processed. ${successCount} created, ${errorCount} failed, ${skippedCount} skipped`, 'success');
             };
             reader.readAsArrayBuffer(file);
         }
