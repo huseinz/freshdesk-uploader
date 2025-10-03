@@ -287,6 +287,7 @@
             }
 
             const table = document.createElement("table");
+            table.classList.add('sortable'); // Add class for table sorting
             const thead = document.createElement("thead");
             const tbody = document.createElement("tbody");
 
@@ -560,5 +561,7 @@
         document.getElementById('listContactFields').addEventListener('click', displayContactFields);
         document.getElementById('listTicketFields').addEventListener('click', displayTicketFields);
     </script>
+    <link href="https://cdn.jsdelivr.net/gh/tofsjonas/sortable@latest/dist/sortable.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/gh/tofsjonas/sortable@latest/dist/sortable.min.js"></script>
 </body>
 </html>
